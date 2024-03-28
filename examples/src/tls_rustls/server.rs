@@ -7,7 +7,7 @@ use pb::{EchoRequest, EchoResponse};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_rustls::{
-    rustls::{Certificate, PrivateKey, ServerConfig},
+    rustls::{pki_types::CertificateDer, ServerConfig},
     TlsAcceptor,
 };
 use tonic::{transport::Server, Request, Response, Status};
@@ -16,29 +16,16 @@ use tower_http::ServiceBuilderExt;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::path::PathBuf::from_iter([std::env!("CARGO_MANIFEST_DIR"), "data"]);
-    let certs = {
-        let fd = std::fs::File::open(data_dir.join("tls/server.pem"))?;
-        let mut buf = std::io::BufReader::new(&fd);
-        rustls_pemfile::certs(&mut buf)?
-            .into_iter()
-            .map(Certificate)
-            .collect()
-    };
-    let key = {
-        let fd = std::fs::File::open(data_dir.join("tls/server.key"))?;
-        let mut buf = std::io::BufReader::new(&fd);
-        rustls_pemfile::pkcs8_private_keys(&mut buf)?
-            .into_iter()
-            .map(PrivateKey)
-            .next()
-            .unwrap()
 
-        // let key = std::fs::read(data_dir.join("tls/server.key"))?;
-        // PrivateKey(key)
-    };
+    let fd = std::fs::File::open(data_dir.join("tls/server.pem"))?;
+    let mut buf = std::io::BufReader::new(&fd);
+    let certs = rustls_pemfile::certs(&mut buf).collect::<Result<Vec<_>, _>>()?;
+
+    let fd = std::fs::File::open(data_dir.join("tls/server.key"))?;
+    let mut buf = std::io::BufReader::new(&fd);
+    let key = rustls_pemfile::private_key(&mut buf)?.unwrap();
 
     let mut tls = ServerConfig::builder()
-        .with_safe_defaults()
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
     tls.alpn_protocols = vec![b"h2".to_vec()];
@@ -94,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[derive(Debug)]
 struct ConnInfo {
     addr: std::net::SocketAddr,
-    certificates: Vec<Certificate>,
+    certificates: Vec<CertificateDer<'static>>,
 }
 
 type EchoResult<T> = Result<Response<T>, Status>;
